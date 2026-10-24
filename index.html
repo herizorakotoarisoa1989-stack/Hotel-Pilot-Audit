@@ -1403,6 +1403,7 @@ let PMS_TZ = 'Indian/Antananarivo', PMS_CUTOFF_H = 3;
 
   <div class="card" id="pmsBouclageCard" style="margin-bottom:16px;"></div>
 
+  <div class="card" id="pmsLedgerCard" style="margin-bottom:16px;"></div>
   <div class="card" id="pmsTrendCard" style="margin-bottom:16px;"></div>
 
   <div class="card" style="margin-bottom:16px;">
@@ -7463,6 +7464,7 @@ const PMS_AUDIT_RULES = {
   surclassementToleranceAr: 5000,  // écart de tarif catégorie en dessous de ce seuil = non signalé
   deepNightStart: 2,               // fenêtre nocturne suspecte pour actions sensibles hors Night Audit/DG
   deepNightEnd: 5,
+  resTopDetails: 15,               // export réservations : nb de cas détaillés par règle
   escalationDays: 3                // jours au-delà desquels une anomalie CRITIQUE/ÉLEVÉE non traitée est signalée en retard
 };
 // Métadonnées d'affichage pour l'écran de configuration — un hôtel peut avoir
@@ -7486,6 +7488,7 @@ const PMS_AUDIT_RULES_META = [
   {key:'surclassementToleranceAr', label:'Tolérance écart tarif pour un surclassement', unit:'Ar', min:0, max:1000000},
   {key:'deepNightStart', label:'Début de la fenêtre nocturne suspecte', unit:'h', min:0, max:23},
   {key:'deepNightEnd', label:'Fin de la fenêtre nocturne suspecte', unit:'h', min:0, max:23},
+  {key:'resTopDetails', label:'Export réservations : nb de cas détaillés par règle', unit:'', min:1, max:100},
   {key:'escalationDays', label:'Délai avant escalade d\'une anomalie critique/élevée non traitée', unit:'j', min:1, max:30}
 ];
 function pmsAuditRulesKey(){
@@ -7561,7 +7564,7 @@ function pmsAuditLoad(){
     const raw=localStorage.getItem(pmsAuditStateKey());
     if(!raw) return;
     const x=JSON.parse(raw);
-    PMS_AUDIT_STATE.imports=Array.isArray(x.imports)?x.imports:[];
+    PMS_AUDIT_STATE.imports=Array.isArray(x.imports)?x.imports.map(i=>i&&Array.isArray(i.raw)?{file:i.file,importedAt:i.importedAt,ledger:i.ledger||null,rows:i.raw.map(r=>pmsNormalizeRow(r,i.file))}:i):[];
     PMS_AUDIT_STATE.findings=Array.isArray(x.findings)?x.findings:[];
     PMS_AUDIT_STATE.lastRun=x.lastRun||null;
     PMS_AUDIT_STATE.lastSource=x.lastSource||'—';
@@ -7579,7 +7582,7 @@ function pmsAuditLoad(){
 function pmsAuditSave(){
   try{
     localStorage.setItem(pmsAuditStateKey(),JSON.stringify({
-      imports:PMS_AUDIT_STATE.imports.slice(-20),
+      imports:PMS_AUDIT_STATE.imports.slice(-20).map(i=>({file:i.file,importedAt:i.importedAt,ledger:i.ledger||null,raw:(i.rows||[]).map(r=>r&&r._raw).filter(Boolean)})),
       findings:PMS_AUDIT_STATE.findings.slice(0,1500),
       lastRun:PMS_AUDIT_STATE.lastRun,
       lastSource:PMS_AUDIT_STATE.lastSource,
@@ -7652,7 +7655,7 @@ function pmsKey(row){
   return pmsText(row,['folio','folio id','folioid','reservation','reservation id','reservationid','booking','booking id','invoice','invoice no','invoice number','facture','num facture']) ||
     [pmsText(row,['room','room no','room number','chambre']),pmsText(row,['guest','guest name','client','nom client']),pmsText(row,['arrival','check in','checkin','date arrivee'])].join('|');
 }
-function pmsNormalizeRow(row, source){
+function pmsNormalizeRowBase(row, source){
   row=row||{};
   // AUDIT P3 — correctif critique : 'date' était placé AVANT 'created at'
   // dans la liste, donc pmsPick renvoyait systématiquement la date
@@ -7662,15 +7665,15 @@ function pmsNormalizeRow(row, source){
   // heure réelle quand elle existe : les alias de timestamp précis
   // passent donc en premier.
   const date=pmsPick(row,['timestamp','created at','datetime','date time','created','heure','date']);
-  const arrival=pmsPick(row,['arrival','arrival date','check in date','checkin date','date arrivee']);
-  const departure=pmsPick(row,['departure','departure date','check out date','checkout date','date depart']);
+  const arrival=pmsPick(row,['arrival','arrival date','check in date','checkin date','date arrivee','date d’entrée','date entrée','date entree','date d entree']);
+  const departure=pmsPick(row,['departure','departure date','check out date','checkout date','date depart','date de sortie','date sortie']);
   const actualArrival=pmsPick(row,['actual arrival','actual check in','checkin time','check in time','heure check in','checkin']);
   const actualDeparture=pmsPick(row,['actual departure','actual check out','checkout time','check out time','heure check out','checkout']);
   const tax=pmsNum(pmsPick(row,['tax','taxes','tax amount','taxe','taxe de sejour','taxes amount','taxe séjour']));
   const taxFlag=pmsText(row,['tax status','tax applied','taxe appliquee','tax included','taxable']);
   const discount=pmsNum(pmsPick(row,['discount','discount amount','remise','remise montant']));
   const discountPct=pmsNum(pmsPick(row,['discount percent','discount %','discount pct','remise %','remise pct']));
-  const amount=pmsNum(pmsPick(row,['amount','total','total amount','montant','revenue','revenue amount','charge','facture','total ttc','totalttc']));
+  const amount=pmsNum(pmsPick(row,['amount','total','total amount','montant','revenue','revenue amount','charge','facture','total ttc','totalttc','montant total','montant ttc']));
   const rack=pmsNum(pmsPick(row,['rack rate','public rate','rack','tarif public','prix public']));
   const contract=pmsNum(pmsPick(row,['contract rate','corporate rate','tarif contractuel','tarif corporate']));
   const net=pmsNum(pmsPick(row,['net rate','room rate','rate','tarif','prix chambre','adr','prix ttc','prix']));
@@ -7678,7 +7681,7 @@ function pmsNormalizeRow(row, source){
     _source:source||'PMS', _raw:row, _internalType:row._internalType||'',
     key:pmsKey(row), date:pmsIsoDate(date),
     room:pmsText(row,['room','room no','room number','chambre','no chambre']),
-    guest:pmsText(row,['guest','guest name','client','customer','nom client','client name']),
+    guest:pmsText(row,['guest','guest name','client','customer','nom client','client name','nom du client','nom de client']),
     guestPrev:pmsText(row,['previous guest','ancien client','ancien nom','old guest name','nom precedent','guest before']),
     reservation:pmsText(row,['reservation','reservation id','booking','booking id','reservation no']),
     folio:pmsText(row,['folio','folio id','folio no']),
@@ -7708,6 +7711,178 @@ function pmsNormalizeRow(row, source){
     deletedFlag:pmsText(row,['deleted','supprime','removed','annule item','cancelled item'])
   };
 }
+// ══════════════════════════════════════════════════════════════════
+// EXPORT RÉSERVATIONS (type Odoo / hotel_booking) — clients, acomptes,
+// factures et paiements. Profil ajouté pour lire un registre de
+// réservations (Référence, Nom du Client, Date d’entrée/sortie, Montant
+// total, Devise, Status, Statut de la facture, Statut du paiement, Acompte).
+// ══════════════════════════════════════════════════════════════════
+function pmsIsLedgerGroupRow(r){
+  // Ligne de regroupement d’un export Odoo : « checkout (4537) », « allot (86) »…
+  // Sans client ni dates, avec un total — ce n’est pas une réservation.
+  const ref=pmsText(r,['référence','reference','ref']);
+  const guest=pmsText(r,['nom du client','nom de client','client','guest']);
+  return /\(\d+\)\s*$/.test(ref) && !guest;
+}
+function pmsLedgerEnrich(r,row){
+  const invoiceStatus=pmsText(row,['statut de la facture','statut facture','invoice status']);
+  const paymentStatus=pmsText(row,['statut du paiement','statut paiement','payment status']);
+  const depRaw=pmsPick(row,['acompte','acomptes','deposit','arrhes','avance']);
+  const depNum=pmsNum(depRaw);
+  r.bookingRef=pmsText(row,['référence','reference','ref','booking ref']);
+  r.invoiceStatus=invoiceStatus;
+  r.paymentStatus=paymentStatus;
+  r.currency=pmsText(row,['devise','currency','monnaie']);
+  r.depositRaw=(depRaw===''||depRaw===null||depRaw===undefined)?'':String(depRaw);
+  r.deposit=depNum!==null?depNum>0:pmsBool(depRaw);
+  r.depositAmount=depNum;
+  r._ledger=!!(invoiceStatus||paymentStatus);
+  // La « Référence » d’un export Odoo n’est pas forcément unique par séjour :
+  // la clé de rapprochement combine référence, client et date d’entrée.
+  if(r._ledger) r.key=[r.bookingRef,r.guest,r.dateArrival||''].join('|');
+  return r;
+}
+function pmsNormalizeRow(row, source){
+  return pmsLedgerEnrich(pmsNormalizeRowBase(row,source),row||{});
+}
+const PMS_LEDGER_RE={
+  sortie:/sorti|check.?out|termin/i, annule:/annul|cancel/i, attribue:/attribu|assign/i,
+  nonPaye:/^non\s*pay|unpaid|not\s*paid/i, partiel:/partiel|partial/i,
+  enPaiement:/en\s*paiement|in\s*payment/i, paye:/^(pay[ée]|paid)$/i, pasFacture:/pas\s*de\s*facture|no\s*invoice/i,
+  entFacture:/enti[eè]rement\s*factur|fully/i, aFacturer:/^[àa]\s*facturer|to\s*invoice/i, rienFacturer:/rien\s*[àa]\s*factur|nothing/i
+};
+function pmsLedgerRows(rows){ return (rows||[]).filter(r=>r&&r._ledger); }
+function pmsLedgerSummary(rows){
+  const L=pmsLedgerRows(rows); if(!L.length) return null;
+  const sum=a=>a.reduce((s,r)=>s+(Number(r.amount)||0),0);
+  const by=k=>{const o={};L.forEach(r=>{const key=r[k]||'—';(o[key]=o[key]||{n:0,montant:0});o[key].n++;o[key].montant+=Number(r.amount)||0;});return o;};
+  const dep=L.filter(r=>r.deposit);
+  const dates=L.map(r=>r.dateArrival).filter(Boolean).sort();
+  return {
+    n:L.length, clients:new Set(L.map(r=>pmsNorm(r.guest)).filter(Boolean)).size,
+    montant:sum(L), devise:(L.find(r=>r.currency)||{}).currency||'',
+    acomptes:{n:dep.length,montant:sum(dep)},
+    statuts:by('status'), factures:by('invoiceStatus'), paiements:by('paymentStatus'),
+    du:dates[0]||null, au:dates[dates.length-1]||null
+  };
+}
+function pmsLedgerTopClients(rows,limit=10){
+  const m={};
+  pmsLedgerRows(rows).filter(r=>!PMS_LEDGER_RE.annule.test(r.status||'')).forEach(r=>{
+    const k=pmsNorm(r.guest); if(!k) return;
+    const c=(m[k]=m[k]||{nom:r.guest,sejours:0,montant:0,impaye:0,acomptes:0});
+    c.sejours++; c.montant+=Number(r.amount)||0;
+    if(PMS_LEDGER_RE.nonPaye.test(r.paymentStatus||'')||PMS_LEDGER_RE.partiel.test(r.paymentStatus||'')) c.impaye+=Number(r.amount)||0;
+    if(r.deposit) c.acomptes++;
+  });
+  return Object.values(m).sort((a,b)=>b.montant-a.montant).slice(0,limit);
+}
+function pmsLedgerSummaryHtml(){
+  const rows=pmsRowsFromImported(), s=pmsLedgerSummary(rows);
+  if(!s) return '<div style="font-size:13px;color:var(--muted);">Importez un export de réservations (Excel/CSV) pour voir ici les clients, acomptes, factures et paiements.</div>';
+  const n=v=>Number(Math.round(v||0)).toLocaleString('fr-FR');
+  const row=(o,lab)=>Object.entries(o).sort((a,b)=>b[1].montant-a[1].montant).map(([k,v])=>`<tr><td>${esc(k)}</td><td style="text-align:right;">${n(v.n)}</td><td style="text-align:right;">${n(v.montant)}</td></tr>`).join('');
+  const tbl=(titre,o)=>`<div style="flex:1;min-width:230px;"><div style="font-weight:700;font-size:12.5px;margin-bottom:4px;">${titre}</div><table style="width:100%;font-size:12px;border-collapse:collapse;"><thead><tr style="color:var(--muted);"><th style="text-align:left;">Statut</th><th style="text-align:right;">Nb</th><th style="text-align:right;">Montant</th></tr></thead><tbody>${row(o)}</tbody></table></div>`;
+  const tile=(lab,val,sub)=>`<div style="border:1px solid var(--line);border-radius:8px;padding:10px 12px;background:var(--card);"><div style="font-size:11.5px;color:var(--muted);font-weight:600;">${lab}</div><div style="font-size:19px;font-weight:800;">${val}</div>${sub?`<div style="font-size:11px;color:var(--muted);">${sub}</div>`:''}</div>`;
+  const dev=esc(s.devise||'Ar');
+  const top=pmsLedgerTopClients(rows,10).map(c=>`<tr><td>${esc(c.nom)}</td><td style="text-align:right;">${n(c.sejours)}</td><td style="text-align:right;">${n(c.montant)}</td><td style="text-align:right;color:${c.impaye>0?'var(--red)':'inherit'};">${n(c.impaye)}</td><td style="text-align:right;">${n(c.acomptes)}</td></tr>`).join('');
+  return `<div class="card-title" style="font-weight:800;margin-bottom:8px;">Réservations, clients, acomptes et factures importés</div>
+  <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:8px;margin-bottom:12px;">
+    ${tile('Réservations',n(s.n),s.du?('du '+pmsFmtDate(s.du).slice(0,10)+' au '+pmsFmtDate(s.au).slice(0,10)):'')}
+    ${tile('Clients distincts',n(s.clients))}
+    ${tile('Montant total',n(s.montant)+' '+dev)}
+    ${tile('Séjours avec acompte',n(s.acomptes.n),'Valeur des séjours : '+n(s.acomptes.montant)+' '+dev)}
+  </div>
+  <div style="display:flex;gap:14px;flex-wrap:wrap;margin-bottom:12px;">${tbl('Statut du séjour',s.statuts)}${tbl('Statut de la facture',s.factures)}${tbl('Statut du paiement',s.paiements)}</div>
+  <div style="font-weight:700;font-size:12.5px;margin-bottom:4px;">10 premiers clients (hors annulations)</div>
+  <div style="overflow-x:auto;"><table style="width:100%;font-size:12px;border-collapse:collapse;"><thead><tr style="color:var(--muted);"><th style="text-align:left;">Client</th><th style="text-align:right;">Séjours</th><th style="text-align:right;">Montant</th><th style="text-align:right;">Non payé / partiel</th><th style="text-align:right;">Acomptes</th></tr></thead><tbody>${top}</tbody></table></div>
+  <div style="font-size:11px;color:var(--muted);margin-top:8px;">L’export indique seulement si un acompte existe (Oui/Non), pas son montant : la valeur affichée est celle des séjours concernés.</div>`;
+}
+// Règles d’audit propres à un registre de réservations — chaque règle donne un
+// constat chiffré, puis le détail des cas les plus importants.
+function pmsLedgerRules(rows,add){
+  const L=pmsLedgerRows(rows); if(!L.length) return;
+  const RE=PMS_LEDGER_RE, top=Math.max(1,Number(PMS_AUDIT_RULES.resTopDetails)||15);
+  const amt=r=>Number(r.amount)||0, sum=a=>a.reduce((s,r)=>s+amt(r),0);
+  const n=v=>Number(Math.round(v||0)).toLocaleString('fr-FR');
+  const today=new Date();
+  const emit=(rule,sev,titre,list,phrase,solution,detailSev,detailTitle,detailPhrase)=>{
+    if(!list.length) return;
+    const sorted=list.slice().sort((a,b)=>amt(b)-amt(a));
+    const noms=sorted.slice(0,5).map(r=>r.guest||r.bookingRef).join(', ');
+    add(rule,sev,titre,`${list.length} cas — ${phrase} : ${n(sum(list))} Ar. Principaux : ${noms}${list.length>5?'…':''}.`,solution,sorted[0]._source,sum(list),{numero:'Synthèse',total:list.length});
+    sorted.slice(0,top).forEach(r=>{
+      add(rule,detailSev||sev,detailTitle||titre,
+        `${r.guest||'Client inconnu'} — réf. ${r.bookingRef||'—'}, séjour du ${pmsFmtDate(r.dateArrival).slice(0,10)} au ${pmsFmtDate(r.dateDeparture).slice(0,10)}, ${n(amt(r))} Ar. Séjour : ${r.status||'—'} · facture : ${r.invoiceStatus||'—'} · paiement : ${r.paymentStatus||'—'}${r.deposit?' · acompte : oui':''}. ${detailPhrase||''}`.trim(),
+        solution,r._source,amt(r),{numero:r.bookingRef,client:r.guest});
+    });
+  };
+  const isSortie=r=>RE.sortie.test(r.status||''), isAnnule=r=>RE.annule.test(r.status||'');
+  const isImpaye=r=>RE.nonPaye.test(r.paymentStatus||'')||RE.partiel.test(r.paymentStatus||'');
+
+  pmsRun('32-RES_SORTIE_NON_FACTUREE',()=>emit('RES_SORTIE_NON_FACTUREE','ÉLEVÉE','Séjours terminés encore « à facturer »',
+    L.filter(r=>isSortie(r)&&RE.aFacturer.test(r.invoiceStatus||'')&&amt(r)>0),'chiffre d’affaires non facturé',
+    'Émettre la facture de chaque séjour terminé, ou documenter pourquoi il n’y en a pas (gratuité autorisée, erreur de saisie). Un client parti sans facture est un risque de perte sèche.',
+    'MOYENNE','Séjour terminé non facturé','Le client est parti, la facture n’est pas faite.'));
+
+  pmsRun('33-RES_SORTIE_IMPAYEE',()=>emit('RES_SORTIE_IMPAYEE','ÉLEVÉE','Séjours terminés non payés ou partiellement payés',
+    L.filter(r=>isSortie(r)&&isImpaye(r)),'montant total des séjours concernés (le reste dû exact n’est pas dans l’export)',
+    'Vérifier chaque dossier : paiement réel manquant, ou règlement non enregistré. Inscrire les vraies dettes au suivi des débiteurs et lancer la relance.',
+    'MOYENNE','Séjour terminé non soldé','Dette client possible.'));
+
+  pmsRun('34-RES_CLIENT_ENCOURS',()=>{
+    const m={};
+    L.filter(r=>isSortie(r)&&isImpaye(r)).forEach(r=>{const k=pmsNorm(r.guest)||r.bookingRef;const c=(m[k]=m[k]||{nom:r.guest,list:[]});c.list.push(r);});
+    Object.values(m).filter(c=>c.list.length>=2||sum(c.list)>=2000000).sort((a,b)=>sum(b.list)-sum(a.list)).slice(0,top).forEach(c=>{
+      add('RES_CLIENT_ENCOURS',sum(c.list)>=5000000?'ÉLEVÉE':'MOYENNE','Client avec plusieurs séjours non soldés',
+        `${c.nom||'Client inconnu'} : ${c.list.length} séjour(s) terminé(s) non soldé(s), ${n(sum(c.list))} Ar au total (montants des séjours, reste dû à confirmer).`,
+        'Relancer ce client en priorité. S’il s’agit d’une société ou d’une institution en compte, vérifier le contrat, l’échéance de paiement et le plafond de crédit avant d’accepter de nouvelles réservations à crédit.',c.list[0]._source,sum(c.list),{numero:c.list[0].bookingRef,client:c.nom});
+    });
+  });
+
+  pmsRun('35-RES_ANNULE_FACTURE',()=>emit('RES_ANNULE_FACTURE','ÉLEVÉE','Réservations annulées mais facturées ou payées',
+    L.filter(r=>isAnnule(r)&&(RE.entFacture.test(r.invoiceStatus||'')||RE.paye.test(r.paymentStatus||'')||RE.enPaiement.test(r.paymentStatus||'')||RE.partiel.test(r.paymentStatus||''))),
+    'montant concerné','Contrôler s’il existe un avoir ou un remboursement. Sinon, annuler la facture ou justifier la conservation (pénalité d’annulation).',
+    'ÉLEVÉE','Annulation avec facture active','Une annulation ne doit plus porter de facture sans avoir.'));
+
+  pmsRun('36-RES_ACOMPTE_SANS_PAIEMENT',()=>emit('RES_ACOMPTE_SANS_PAIEMENT','MOYENNE','Acompte déclaré sans paiement enregistré',
+    L.filter(r=>r.deposit&&!isAnnule(r)&&(RE.nonPaye.test(r.paymentStatus||'')||RE.pasFacture.test(r.paymentStatus||''))),'séjours concernés',
+    'Retrouver le reçu de l’acompte et l’enregistrer sur le dossier, ou corriger l’indicateur « Acompte ».',
+    'MOYENNE','Acompte sans paiement','Acompte indiqué « Oui » mais aucun paiement rattaché.'));
+
+  pmsRun('37-RES_ACOMPTE_ANNULATION',()=>emit('RES_ACOMPTE_ANNULATION','MOYENNE','Acompte sur réservation annulée',
+    L.filter(r=>r.deposit&&isAnnule(r)),'séjours concernés','Documenter le sort de l’acompte : remboursement, report de séjour ou conservation selon la politique d’annulation.',
+    'MOYENNE','Acompte sur annulation','Acompte à rembourser ou à conserver.'));
+
+  pmsRun('38-RES_MONTANT_ABSENT',()=>emit('RES_MONTANT_ABSENT','MOYENNE','Séjours sans montant',
+    L.filter(r=>!isAnnule(r)&&(r.amount===null||r.amount===undefined||Number(r.amount)<=0)),'séjours non valorisés',
+    'Renseigner le tarif du séjour, ou justifier la gratuité (invité de la direction, compensation).',
+    'MOYENNE','Séjour sans montant','Le séjour n’a aucune valeur enregistrée.'));
+
+  pmsRun('40-RES_ATTRIBUE_NON_CLOTURE',()=>emit('RES_ATTRIBUE_NON_CLOTURE','MOYENNE','Séjours « attribués » dont la date de sortie est dépassée',
+    L.filter(r=>RE.attribue.test(r.status||'')&&r.dateDeparture&&new Date(r.dateDeparture)<new Date(today.getTime()-86400000)),'séjours non clôturés',
+    'Faire le départ dans le PMS pour les clients partis, ou annuler les no-shows. Un séjour non clôturé fausse l’occupation et laisse la facture ouverte.',
+    'MOYENNE','Séjour non clôturé','La date de sortie est passée, le départ n’est pas enregistré.'));
+
+  pmsRun('41-RES_DOUBLON_RESERVATION',()=>{
+    const m={};
+    L.filter(r=>!isAnnule(r)&&r.guest&&r.dateArrival&&r.dateDeparture).forEach(r=>{
+      const k=[pmsNorm(r.guest),String(r.dateArrival).slice(0,10),String(r.dateDeparture).slice(0,10)].join('|');(m[k]=m[k]||[]).push(r);
+    });
+    const dup=Object.values(m).filter(g=>g.length>1);
+    emit('RES_DOUBLON_RESERVATION','FAIBLE','Doublons de réservation possibles (à vérifier)',dup.map(g=>g[1]),'montant possiblement compté deux fois (peut aussi être un groupe qui réserve plusieurs chambres : l’export n’a pas de numéro de chambre)',
+      'Comparer les dossiers : si c’est le même séjour, annuler le doublon avant facturation. Pour un groupe ou une société, plusieurs lignes identiques sont normales.','FAIBLE','Doublon possible','Même client et mêmes dates qu’un autre dossier.');
+  });
+
+  pmsRun('42-RES_PAIEMENT_NON_RAPPROCHE',()=>{
+    const list=L.filter(r=>RE.enPaiement.test(r.paymentStatus||''));
+    if(!list.length) return;
+    add('RES_PAIEMENT_NON_RAPPROCHE','FAIBLE','Paiements « en paiement » en attente de rapprochement',
+      `${list.length} dossier(s) au statut « En paiement » pour ${n(sum(list))} Ar. Dans un export de ce type, ce statut signifie en général qu’un règlement est saisi mais pas encore rapproché avec la banque ou la caisse (à confirmer pour votre PMS).`,
+      'Rapprocher ces paiements avec le relevé bancaire, le Mobile Money et la caisse. Ils ne sont pas à traiter comme des impayés.',list[0]._source,sum(list),{numero:'Synthèse',total:list.length});
+  });
+}
+
 function pmsSeverity(level){ return level==='CRITIQUE'?'danger':level==='ÉLEVÉE'?'danger':level==='MOYENNE'?'warning':'info'; }
 function pmsFinding(rule,severity,title,evidence,solution,source,amount=0,meta={}){
   return {id:'pa_'+Date.now()+'_'+Math.random().toString(36).slice(2,8),rule,severity,title,evidence,solution,source:source||'PMS',amount:Number(amount)||0,meta,createdAt:new Date().toISOString()};
@@ -8432,6 +8607,8 @@ function pmsAuditAnalyze(mode='all'){
   }
   }); // fin pmsRun 31-ADR_ANORMAL
 
+  pmsRun('32-RESERVATIONS',()=>pmsLedgerRules(rows,add));
+
   const seen=new Set();
   const clean=findings.filter(f=>{
     const k=[f.rule,f.title,f.evidence].join('|');
@@ -8713,7 +8890,12 @@ const PMS_RULE_DOMAINS = {
   MODIFICATION_APRES_DEPART:'Chambres & Opérations', SUPPRESSION_EXTRA:'Chambres & Opérations',
   CHANGEMENT_NOM_CLIENT:'Chambres & Opérations',
   COMPORTEMENT_ATYPIQUE:'Gouvernance & Comportement', ACTION_HORS_HORAIRE:'Gouvernance & Comportement',
-  INTEGRITE_JOURNAL:'Gouvernance & Comportement'
+  INTEGRITE_JOURNAL:'Gouvernance & Comportement',
+  RES_SORTIE_NON_FACTUREE:'Facturation & Revenus', RES_MONTANT_ABSENT:'Facturation & Revenus', RES_DOUBLON_RESERVATION:'Facturation & Revenus',
+  RES_ANNULE_FACTURE:'Facturation & Revenus', RES_ACOMPTE_ANNULATION:'Facturation & Revenus',
+  RES_SORTIE_IMPAYEE:'Créances & Recouvrement', RES_CLIENT_ENCOURS:'Créances & Recouvrement', RES_ACOMPTE_SANS_PAIEMENT:'Créances & Recouvrement',
+  RES_PAIEMENT_NON_RAPPROCHE:'Caisse & Trésorerie',
+  RES_ATTRIBUE_NON_CLOTURE:'Chambres & Opérations'
 };
 function pmsRuleDomain(rule){ return PMS_RULE_DOMAINS[rule]||'Autre'; }
 // Explication en langage hôtelier simple — pas de jargon d'audit. Le code de
@@ -8752,7 +8934,17 @@ const PMS_RULE_EXPLANATIONS = {
   CHANGEMENT_NOM_CLIENT:'Le nom du client a changé sur un dossier déjà ouvert, sans explication évidente.',
   COMPORTEMENT_ATYPIQUE:'Un utilisateur a fait beaucoup plus de modifications/annulations que la moyenne des autres employés.',
   ACTION_HORS_HORAIRE:'Une action sensible (encaissement, départ...) a été faite en pleine nuit par quelqu\'un qui n\'est normalement pas de service à cette heure.',
-  INTEGRITE_JOURNAL:'Le journal des actions de l\'hôtel a perdu des entrées — signe possible d\'une modification non autorisée du système.'
+  INTEGRITE_JOURNAL:'Le journal des actions de l\'hôtel a perdu des entrées — signe possible d\'une modification non autorisée du système.',
+  RES_SORTIE_NON_FACTUREE:'Un client est parti mais son séjour est encore marqué « à facturer » : le chiffre d’affaires n’est pas encore encaissable.',
+  RES_SORTIE_IMPAYEE:'Un client est parti sans avoir tout payé, d’après le statut de paiement du registre.',
+  RES_CLIENT_ENCOURS:'Un même client cumule plusieurs séjours terminés non soldés.',
+  RES_ANNULE_FACTURE:'Une réservation annulée porte encore une facture ou un paiement : il faut un avoir, un remboursement ou une pénalité justifiée.',
+  RES_ACOMPTE_SANS_PAIEMENT:'Le dossier indique un acompte, mais aucun paiement n’y est rattaché.',
+  RES_ACOMPTE_ANNULATION:'Un acompte a été pris sur une réservation ensuite annulée : son sort doit être documenté.',
+  RES_MONTANT_ABSENT:'Un séjour non annulé n’a aucun montant enregistré.',
+  RES_ATTRIBUE_NON_CLOTURE:'Le séjour est encore « attribué » alors que sa date de sortie est dépassée : le départ n’a pas été enregistré.',
+  RES_DOUBLON_RESERVATION:'Deux dossiers ont le même client et les mêmes dates : risque de revenu compté en double.',
+  RES_PAIEMENT_NON_RAPPROCHE:'Des paiements sont saisis mais pas encore rapprochés avec la banque ou la caisse.'
 };
 function pmsRuleExplain(rule){ return PMS_RULE_EXPLANATIONS[rule]||''; }
 function pmsAuditDomainBreakdown(active){
@@ -9040,6 +9232,7 @@ function pmsAuditHtml(mode=PMS_AUDIT_STATE.lastMode||'all'){
   set('pmsBouclageCard', pmsBouclageHtml());
   pmsAuditRecordHistory(s);
   set('pmsTrendCard', pmsAuditTrendHtml(f));
+  set('pmsLedgerCard', pmsLedgerSummaryHtml());
   set('pmsRulesCard', pmsAuditRulesHtml());
   set('pmsAuditReport',pmsAuditBuildReport(result));
   return result;
@@ -9104,7 +9297,7 @@ async function pmsAuditClearImports(){
 }
 function pmsAuditImportFiles(files){
   const list=[...files];if(!list.length)return;
-  let pending=list.length,imported=0,errors=[];
+  let pending=list.length,imported=0,errors=[],ledgerMsg='';
   list.forEach(file=>{
     const reader=new FileReader();
     reader.onload=e=>{
@@ -9121,15 +9314,18 @@ function pmsAuditImportFiles(files){
           const wb=XLSX.read(e.target.result,{type:'array',cellDates:true});
           wb.SheetNames.forEach(sheet=>{
             const raw=XLSX.utils.sheet_to_json(wb.Sheets[sheet],{defval:'',raw:true});
-            rows.push(...raw.map(r=>Object.assign({},r,{_sheet:sheet})));
+            rows.push(...raw.filter(r=>!pmsIsLedgerGroupRow(r)).map(r=>Object.assign({},r,{_sheet:sheet})));
           });
         }
         const normalized=rows.map(r=>pmsNormalizeRow(r,file.name)).filter(r=>Object.values(r).some(v=>v!==''&&v!==null&&v!==undefined));
-        PMS_AUDIT_STATE.imports.push({file:file.name,importedAt:new Date().toISOString(),rows:normalized});imported+=normalized.length;
+        PMS_AUDIT_STATE.imports=PMS_AUDIT_STATE.imports.filter(x=>x.file!==file.name);
+        const ledger=pmsLedgerSummary(normalized);
+        PMS_AUDIT_STATE.imports.push({file:file.name,importedAt:new Date().toISOString(),rows:normalized,ledger});imported+=normalized.length;
+        if(ledger) ledgerMsg=`${ledger.n} réservation(s), ${ledger.clients} client(s), ${ledger.acomptes.n} avec acompte. `;
       }catch(err){errors.push(file.name+': '+err.message);}
       if(--pending===0){
         PMS_AUDIT_STATE.lastMode='autonomous';pmsAuditSave();pmsAuditHtml('autonomous');
-        showToast(errors.length?'Import terminé avec erreurs. '+errors.join(' | '):`${imported} ligne(s) PMS importée(s), scannée(s) et rapport généré.`,'success');
+        showToast(errors.length?'Import terminé avec erreurs. '+errors.join(' | '):`${ledgerMsg}${imported} ligne(s) PMS importée(s), scannée(s) et rapport généré.`,'success');
       }
     };
     reader.onerror=()=>{errors.push(file.name+': lecture impossible');if(--pending===0)pmsAuditHtml('autonomous');};
