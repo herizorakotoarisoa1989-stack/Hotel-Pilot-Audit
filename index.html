@@ -2156,6 +2156,15 @@ let PMS_TZ = 'Indian/Antananarivo', PMS_CUTOFF_H = 3;
 
   <div class="grid-4" id="resStats" style="margin-bottom:12px;"></div>
 
+  <div class="card" style="margin-bottom:12px;">
+    <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;">
+      <input id="resCloudQ" type="search" placeholder="Rechercher dans tout l’historique (client ou référence)…" style="flex:1;min-width:200px;padding:8px 10px;border:1px solid var(--line);border-radius:8px;" onkeydown="if(event.key==='Enter')pmsSearchCloudReservations()">
+      <button class="btn btn-primary" onclick="pmsSearchCloudReservations()">Rechercher</button>
+      <button class="btn btn-ghost" onclick="pmsEstimerChambres()" title="Attribue une chambre estimée d’après le tarif par nuit aux réservations sans chambre">Affecter les chambres (estimation)</button>
+    </div>
+    <div id="resCloudResult" style="margin-top:8px;overflow-x:auto;font-size:12.5px;"></div>
+  </div>
+
   <div class="flex" style="margin-bottom:10px;gap:6px;flex-wrap:wrap;">
     <span style="font-size:12px;font-weight:600;color:var(--muted);align-self:center;" data-i18n="common.filtrer">Filtrer :</span>
     <button class="btn btn-sm btn-outline" onclick="filterRes('all')" data-i18n="plan.filter.all">Toutes</button>
@@ -5022,8 +5031,9 @@ const LOG_KEY   = scopedKey('nightAuditPro_log_v1',   ACTIVE_HOTEL_ID);
 // enregistrés dans le navigateur (anciens codes par défaut ou tout autre
 // code précédent) par les vrais codes définitifs choisis par la Direction.
 // Ne touche à rien d'autre (couleur, historique, statut actif…).
-const PIN_FORCE_KEY = scopedKey('nightAuditPro_pinForce_v2', ACTIVE_HOTEL_ID);
-const FORCED_PINS = { u_dg:'0407', u_na:'2209', u_gov:'1984', u_rec:'1406', u_rst:'2025', u_tc:'2014' };
+const PIN_FORCE_KEY = scopedKey('nightAuditPro_pinForce_v3', ACTIVE_HOTEL_ID);
+// Plus aucun PIN par défaut dans le code : les anciens codes ont été exposés et doivent être remplacés.
+const FORCED_PINS = {};
 
 // Rôles & permissions
 const ROLES = {
@@ -5041,13 +5051,41 @@ const ROLES = {
                     acces:['dashboard','maintenance'] },
 };
 
+
+/* ── Codes PIN initiaux : générés au hasard, affichés une seule fois ── */
+function pmsRandPins(n, exclude){
+  const weak = new Set(['0000','1111','2222','3333','4444','5555','6666','7777','8888','9999','1234','4321','1212','2580','0123','3210']);
+  const out = [], used = new Set(exclude || []);
+  const buf = new Uint32Array(64); crypto.getRandomValues(buf); let i = 0;
+  while(out.length < n){
+    if(i >= buf.length){ crypto.getRandomValues(buf); i = 0; }
+    const p = String(buf[i++] % 10000).padStart(4, '0');
+    if(!weak.has(p) && !used.has(p)){ out.push(p); used.add(p); }
+  }
+  return out;
+}
+function pmsShowInitialPins(){
+  const list = window.__PMS_INIT_PINS;
+  if(!list || !list.length || document.getElementById('pmsInitPins')) return;
+  const el = document.createElement('div');
+  el.id = 'pmsInitPins';
+  el.style.cssText = 'position:fixed;inset:0;z-index:99999;background:rgba(15,23,42,.94);display:flex;align-items:center;justify-content:center;padding:16px;';
+  el.innerHTML = `<div style="background:#fff;color:#0F172A;border-radius:14px;max-width:420px;width:100%;padding:20px;font-family:Inter,sans-serif;">
+    <div style="font-weight:800;font-size:17px;margin-bottom:6px;">Codes PIN initiaux</div>
+    <div style="font-size:13px;color:#475569;margin-bottom:12px;">Notez-les maintenant : ils ne seront <b>plus affichés</b>. Chaque utilisateur choisira son propre PIN à sa première connexion.</div>
+    <table style="width:100%;font-size:14px;border-collapse:collapse;">${list.map(u=>`<tr style="border-top:1px solid #E2E8F0;"><td style="padding:7px 0;">${esc(u.nom)}</td><td style="text-align:right;font-family:'IBM Plex Mono',monospace;font-weight:700;font-size:16px;">${esc(u.pin)}</td></tr>`).join('')}</table>
+    <button id="pmsInitPinsOk" style="margin-top:14px;width:100%;padding:11px;border:0;border-radius:9px;background:#0F172A;color:#fff;font-weight:700;">J’ai noté les codes</button></div>`;
+  document.body.appendChild(el);
+  document.getElementById('pmsInitPinsOk').onclick = () => { delete window.__PMS_INIT_PINS; el.remove(); };
+}
+
 const DEFAULT_USERS = [
-  { id:'u_dg',  nom:'Directeur',       initiales:'DG', role:'dg',             pin:'0407', couleur:'#8A6D14', actif:true, mustChangePin:false, question:'', reponse:'', lastLogin:null, loginHistory:[] },
-  { id:'u_na',  nom:'Night Audit',     initiales:'NA', role:'nightaudit',     pin:'2209', couleur:'#7C3AED', actif:true, mustChangePin:false, question:'', reponse:'', lastLogin:null, loginHistory:[] },
-  { id:'u_gov', nom:'Gouvernante',     initiales:'GV', role:'gouvernante',    pin:'1984', couleur:'#2563EB', actif:true, mustChangePin:false, question:'', reponse:'', lastLogin:null, loginHistory:[] },
-  { id:'u_rec', nom:'Réceptionniste',  initiales:'RC', role:'receptionniste', pin:'1406', couleur:'#16A34A', actif:true, mustChangePin:false, question:'', reponse:'', lastLogin:null, loginHistory:[] },
-  { id:'u_rst', nom:'Restaurant',      initiales:'RS', role:'restaurant',     pin:'2025', couleur:'#D97706', actif:true, mustChangePin:false, question:'', reponse:'', lastLogin:null, loginHistory:[] },
-  { id:'u_tc',  nom:'Technicien',      initiales:'TC', role:'technicien',     pin:'2014', couleur:'#DC2626', actif:true, mustChangePin:false, question:'', reponse:'', lastLogin:null, loginHistory:[] },
+  { id:'u_dg',  nom:'Directeur',       initiales:'DG', role:'dg',             pin:'', couleur:'#8A6D14', actif:true, mustChangePin:true, question:'', reponse:'', lastLogin:null, loginHistory:[] },
+  { id:'u_na',  nom:'Night Audit',     initiales:'NA', role:'nightaudit',     pin:'', couleur:'#7C3AED', actif:true, mustChangePin:true, question:'', reponse:'', lastLogin:null, loginHistory:[] },
+  { id:'u_gov', nom:'Gouvernante',     initiales:'GV', role:'gouvernante',    pin:'', couleur:'#2563EB', actif:true, mustChangePin:true, question:'', reponse:'', lastLogin:null, loginHistory:[] },
+  { id:'u_rec', nom:'Réceptionniste',  initiales:'RC', role:'receptionniste', pin:'', couleur:'#16A34A', actif:true, mustChangePin:true, question:'', reponse:'', lastLogin:null, loginHistory:[] },
+  { id:'u_rst', nom:'Restaurant',      initiales:'RS', role:'restaurant',     pin:'', couleur:'#D97706', actif:true, mustChangePin:true, question:'', reponse:'', lastLogin:null, loginHistory:[] },
+  { id:'u_tc',  nom:'Technicien',      initiales:'TC', role:'technicien',     pin:'', couleur:'#DC2626', actif:true, mustChangePin:true, question:'', reponse:'', lastLogin:null, loginHistory:[] },
 ];
 
 // ── Fonctions session existantes (conservées) ──
@@ -5108,19 +5146,26 @@ const SEC = {
         // Migration forcée des PIN (une seule fois) : impose les vrais codes
         // définitifs même si d'anciens codes étaient déjà enregistrés ici.
         if(!localStorage.getItem(PIN_FORCE_KEY)){
-          list.forEach(u=>{
-            if(FORCED_PINS[u.id]){ u.pin = FORCED_PINS[u.id]; u.mustChangePin = false; migrated=true; }
-          });
+          // Les anciens PIN par défaut ont été publiés dans le code : chacun doit en choisir un nouveau.
+          list.forEach(u=>{ if(u.actif!==false){ u.mustChangePin = true; migrated=true; } });
           safeSetItem(PIN_FORCE_KEY, '1');
         }
         if(migrated) safeSetItem(USERS_KEY, JSON.stringify(list));
         return list;
       }
     }catch(e){}
-    const list = DEFAULT_USERS.map(u=>({...u}));
+    const pins = pmsRandPins(DEFAULT_USERS.length);
+    const list = DEFAULT_USERS.map((u,i)=>({...u, pin:pins[i], mustChangePin:true}));
     const oldPin = localStorage.getItem(PIN_KEY);
-    if(oldPin && oldPin!=='1234') list.find(u=>u.id==='u_dg').pin = oldPin;
+    if(oldPin && oldPin!=='1234'){
+      const dg = list.find(u=>u.id==='u_dg');
+      list.forEach(u=>{ if(u!==dg && u.pin===oldPin) u.pin = pmsRandPins(1, list.map(x=>x.pin).concat(oldPin))[0]; });
+      dg.pin = oldPin;
+    }
     safeSetItem(USERS_KEY, JSON.stringify(list));
+    window.__PMS_INIT_PINS = list.map(u=>({ nom:u.nom, pin:u.pin }));
+    if(document.readyState==='loading') document.addEventListener('DOMContentLoaded', pmsShowInitialPins);
+    else setTimeout(pmsShowInitialPins, 0);
     return list;
   },
   saveUsers(list){ safeSetItem(USERS_KEY, JSON.stringify(list)); },
@@ -14962,6 +15007,14 @@ function renderResChambreList(){
   }).map(c=>c.id);
   dl.innerHTML=libres.map(n=>`<option value="${n}">`).join('');
 }
+function pmsResBadges(r){
+  const b=(t,c)=>` <span class="badge ${c}" style="font-size:10px;">${esc(t)}</span>`;
+  let o='';
+  if(r.acompteOui) o+=b('Acompte','badge-green');
+  if(r.statutFacture) o+=b(r.statutFacture,/enti[eè]rement/i.test(r.statutFacture)?'badge-blue':(/factur/i.test(r.statutFacture)&&/^[àa]/i.test(r.statutFacture)?'badge-amber':'badge-navy'));
+  if(r.statutPaiement) o+=b(r.statutPaiement,/^non\s*pay/i.test(r.statutPaiement)?'badge-red':(/partiel/i.test(r.statutPaiement)?'badge-amber':(/^pay/i.test(r.statutPaiement)?'badge-green':'badge-navy')));
+  return o;
+}
 function renderReservations(){
   const STATUT_COLOR={
     'Confirmée':'badge-green','En attente':'badge-amber',
@@ -14990,7 +15043,7 @@ function renderReservations(){
       const solde=Number(r.montant)-Number(r.acompte);
       return `<tr>
         <td>${r.date}</td><td>${r.dateDep||'—'}</td>
-        <td class="td-mono">${esc(r.chambre)||'—'}</td>
+        <td class="td-mono">${esc(r.chambre)||'—'}${r.chambreEstimee?' <span title="Chambre estimée d’après le tarif (l’export n’a pas de numéro de chambre)" style="color:var(--amber);font-weight:700;">~</span>':''}</td>
         <td style="font-weight:600;">${esc(r.client)}</td>
         <td>${r.adultes||1}A ${r.enfants?r.enfants+'E':''}</td>
         <td><span class="badge badge-navy">${esc(r.source)}</span></td>
@@ -15002,7 +15055,7 @@ function renderReservations(){
             ${['Confirmée','En attente','Arrivée','No-show','Annulée'].map(s=>`<option ${r.statut===s?'selected':''}>${s}</option>`).join('')}
           </select>
         </td>
-        <td style="font-size:11px;color:var(--muted);">${esc(r.note)||'—'}${r.pgId?' <span title="Synchronisée avec le cloud">☁️</span>':''}</td>
+        <td style="font-size:11px;color:var(--muted);">${esc(r.note)||'—'}${pmsResBadges(r)}${r.pgId?' <span title="Synchronisée avec le cloud">☁️</span>':''}</td>
         <td><button class="btn-ghost" onclick="deleteReservation('${r.id}')">✕</button></td>
       </tr>`;
     }).join('');
@@ -15130,10 +15183,17 @@ function filterHK(f){hkFilter=f;renderHousekeeping();}
 // immédiatement, quel que soit le dernier état ménage enregistré (qui peut
 // dater d'avant ce séjour). Le statut ménage (propre/sale/...) ne reprend
 // la main que lorsque la chambre est vacante. ──
+// Aucun état ménage enregistré pour cette chambre : elle n’est PAS « sale » par défaut.
+// Elle n’est « Sale » que si un client en est parti aujourd’hui ; sinon « Propre ».
+function hkEtatParDefaut(id){
+  const today=todayISO();
+  const parti=(D.reservations||[]).some(r=>String(r.chambre)===String(id)&&r.dateDep===today&&/termin|d[ée]part/i.test(r.statut||''));
+  return parti?'sale':'propre';
+}
 function getHKStatut(id){
   const c = D.chambres.find(x=>x.id===id);
   if(c && c.statut==='occupee') return 'occupee';
-  return D.hkEtat[id]||'sale';
+  return D.hkEtat[id]||hkEtatParDefaut(id);
 }
 
 async function setHKStatut(id,s){
@@ -16537,7 +16597,7 @@ const AGENT = (function(){
     const c = D.chambres.find(x=>x.id===chId);
     if(!c){ pushMsg(`La chambre ${esc(chId)} n'existe pas.`, 'agent-msg-error'); return; }
     const cat = getCategorieByNum(chId);
-    const hk = D.hkEtat[chId]||'sale';
+    const hk = D.hkEtat[chId]||hkEtatParDefaut(chId);
     pushMsg(`<b>Chambre ${chId}</b> — ${STATUT_LBL[c.statut]} ${STATUT_ICO[c.statut]}<br>
       Catégorie : ${esc(cat.label)}<br>
       Client : ${c.client?esc(c.client):'—'}<br>
@@ -16565,17 +16625,19 @@ Actions possibles et leur schéma JSON exact :
 - {"action":"unclear","message":"explication courte de ce qui manque"}
 Réponds UNIQUEMENT avec l'objet JSON, sans texte autour, sans balises markdown.`;
 
-      const response = await fetch("https://api.anthropic.com/v1/messages", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          model: "claude-sonnet-4-6",
-          max_tokens: 300,
-          system,
-          messages: [{ role: "user", content: raw }]
-        })
+      if(typeof CloudBridge === 'undefined' || !CloudBridge.isReady || !CloudBridge.isReady()){
+        pushMsg('Connectez-vous au Cloud pour utiliser l\'assistant IA.', 'agent-msg-error'); return;
+      }
+      const sess = await CloudBridge.client().auth.getSession();
+      const token = sess && sess.data && sess.data.session && sess.data.session.access_token;
+      if(!token){ pushMsg('Session expirée : reconnectez-vous pour utiliser l\'assistant IA.', 'agent-msg-error'); return; }
+      const response = await fetch('/api/assistant', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token },
+        body: JSON.stringify({ max_tokens: 300, system, messages: [{ role: 'user', content: raw }] })
       });
       const data = await response.json();
+      if(!response.ok){ pushMsg('Assistant IA indisponible : ' + esc((data && data.error) || ('erreur ' + response.status)), 'agent-msg-error'); return; }
       const textBlock = (data.content||[]).find(b=>b.type==='text');
       if(!textBlock){ pushMsg('L\'IA n\'a pas pu interpréter la commande. Reformulez svp.', 'agent-msg-error'); return; }
       const clean = textBlock.text.replace(/```json|```/g,'').trim();
@@ -16739,7 +16801,7 @@ async function pmsSyncCloudReservations(opts){
   let rows = [], o = 0;
   for(;;){
     const { data, error } = await cl.from('reservations')
-      .select('id,version,guest_name,date_arrivee,date_depart,statut,vip,groupe,canal,prix_nuit,created_at,rooms(numero)')
+      .select('id,version,guest_name,date_arrivee,date_depart,statut,vip,groupe,canal,prix_nuit,created_at,montant_total,statut_facture,statut_paiement,acompte,reference_externe,chambre_estimee,rooms(numero)')
       .gte('date_depart', from).order('date_arrivee', { ascending:true }).range(o, o + 999);
     if(error) throw error;
     rows = rows.concat(data || []);
@@ -16757,14 +16819,18 @@ async function pmsSyncCloudReservations(opts){
     const ex = byPg.get(r.id);
     const nuits = Math.max(1, diffDaysISO(r.date_arrivee, r.date_depart));
     if(ex){
-      if(ex.statut !== statut || ex.date !== r.date_arrivee || ex.dateDep !== r.date_depart || ex.chambre !== chambre || ex.pgVersion !== r.version){
-        ex.statut = statut; ex.date = r.date_arrivee; ex.dateDep = r.date_depart; ex.chambre = chambre; ex.pgVersion = r.version; updated++;
+      if(ex.statut !== statut || ex.date !== r.date_arrivee || ex.dateDep !== r.date_depart || ex.chambre !== chambre || ex.pgVersion !== r.version || ex.statutFacture === undefined){
+        ex.statut = statut; ex.date = r.date_arrivee; ex.dateDep = r.date_depart; ex.chambre = chambre; ex.pgVersion = r.version;
+        if(r.montant_total != null) ex.montant = Math.round(Number(r.montant_total));
+        ex.acompteOui = !!r.acompte; ex.statutFacture = r.statut_facture || ''; ex.statutPaiement = r.statut_paiement || '';
+        ex.refExterne = r.reference_externe || ''; ex.chambreEstimee = !!r.chambre_estimee; updated++;
       }
     } else {
       const cat = (typeof getCategorieByNum === 'function' && chambre) ? getCategorieByNum(chambre) : null;
       D.reservations.push({
         id:uid(), date:r.date_arrivee, dateDep:r.date_depart, chambre, client:r.guest_name, adultes:1, enfants:0,
-        source:r.canal || 'Direct', montant:Math.round((r.prix_nuit || 0) * nuits), acompte:0, statut, note:'',
+        source:r.canal || 'Direct', montant:Math.round(r.montant_total != null ? Number(r.montant_total) : (r.prix_nuit || 0) * nuits), acompte:0, statut, note:'',
+        acompteOui:!!r.acompte, statutFacture:r.statut_facture || '', statutPaiement:r.statut_paiement || '', refExterne:r.reference_externe || '', chambreEstimee:!!r.chambre_estimee,
         groupe:r.groupe || '', vip:!!r.vip, isDayUse:false, taxeSejourAppliquee:false,
         heureCheckIn:(typeof HORAIRE_FACTURATION !== 'undefined' ? HORAIRE_FACTURATION.checkInNormal : '14:00'),
         heureCheckOut:(typeof HORAIRE_FACTURATION !== 'undefined' ? HORAIRE_FACTURATION.checkOutNormal : '12:00'),
@@ -16789,6 +16855,42 @@ async function pmsSyncCloudReservations(opts){
   return { added, updated, removed, total:rows.length };
 }
 window.pmsSyncCloudReservations = pmsSyncCloudReservations;
+
+/* ─────────── 1b) RECHERCHE DANS TOUT L’HISTORIQUE + AFFECTATION ESTIMÉE DES CHAMBRES ─────────── */
+async function pmsSearchCloudReservations(){
+  const out = $id('resCloudResult'); if(!out) return;
+  const q = (($id('resCloudQ') || {}).value || '').trim();
+  if(!cloudReady()){ out.textContent = 'Connexion Cloud requise.'; return; }
+  if(q.length < 2){ out.textContent = 'Saisissez au moins 2 caractères.'; return; }
+  out.textContent = 'Recherche…';
+  const safe = q.replace(/[%,()*\\]/g, ' ');
+  try{
+    const { data, error } = await CloudBridge.client().from('reservations')
+      .select('guest_name,reference_externe,date_arrivee,date_depart,statut,montant_total,devise,statut_facture,statut_paiement,acompte,chambre_estimee,rooms(numero)')
+      .or(`guest_name.ilike.%${safe}%,reference_externe.ilike.%${safe}%`)
+      .order('date_arrivee', { ascending:false }).limit(200);
+    if(error) throw error;
+    if(!data || !data.length){ out.textContent = 'Aucun résultat.'; return; }
+    const n = v => v == null ? '—' : Number(Math.round(v)).toLocaleString('fr-FR');
+    out.innerHTML = `<div style="color:var(--muted);margin-bottom:4px;">${data.length}${data.length>=200?'+':''} résultat(s)</div>
+      <table style="width:100%;border-collapse:collapse;font-size:12px;"><thead><tr style="color:var(--muted);text-align:left;"><th>Client</th><th>Réf.</th><th>Arrivée</th><th>Départ</th><th>Chambre</th><th style="text-align:right;">Montant</th><th>Séjour</th><th>Facture</th><th>Paiement</th><th>Acompte</th></tr></thead><tbody>${
+      data.map(r => `<tr style="border-top:1px solid var(--line);"><td>${h(r.guest_name)}</td><td>${h(r.reference_externe||'—')}</td><td>${h(r.date_arrivee)}</td><td>${h(r.date_depart)}</td><td>${h((r.rooms&&r.rooms.numero)||'—')}${r.chambre_estimee?' ~':''}</td><td style="text-align:right;">${n(r.montant_total)} ${h(r.devise||'')}</td><td>${h(r.statut)}</td><td>${h(r.statut_facture||'—')}</td><td>${h(r.statut_paiement||'—')}</td><td>${r.acompte?'Oui':'Non'}</td></tr>`).join('')
+      }</tbody></table>`;
+  }catch(e){ out.textContent = 'Recherche impossible : ' + errMsg(e); }
+}
+window.pmsSearchCloudReservations = pmsSearchCloudReservations;
+
+async function pmsEstimerChambres(){
+  if(!cloudReady()){ toast('Connexion Cloud requise.', 'error'); return; }
+  if(typeof confirmModal === 'function' && !(await confirmModal('Attribuer une chambre estimée (d’après le tarif par nuit) aux réservations en cours et à venir qui n’en ont pas ? Les chambres estimées sont repérées par « ~ ».'))) return;
+  try{
+    const res = await CloudBridge.rpc('fn_estimer_chambres', { p_depuis: addDaysISO(todayISO(), -7) });
+    const r = Array.isArray(res) ? res[0] : res;
+    await pmsSyncCloudReservations({});
+    toast(`${(r && r.assigned) || 0} chambre(s) estimée(s), ${(r && r.skipped) || 0} laissée(s) sans chambre (tarif hors grille ou aucune chambre libre).`, 'success');
+  }catch(e){ toast('Affectation impossible : ' + errMsg(e), 'error'); }
+}
+window.pmsEstimerChambres = pmsEstimerChambres;
 
 /* ─────────── 2) DONNÉES DE DÉMONSTRATION (DG) ─────────── */
 async function pmsDemoRefresh(){
