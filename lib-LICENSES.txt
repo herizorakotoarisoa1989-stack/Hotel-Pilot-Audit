@@ -1,0 +1,8 @@
+Bibliothèques tierces embarquées (copies exactes des paquets npm, versions figées)
+- @supabase/supabase-js 2.117.3 — licence : MIT
+- lucide 1.55.0 — licence : ISC
+- chart.js 4.4.1 — licence : MIT
+- papaparse 5.4.1 — licence : MIT
+- html2canvas 1.4.1 — licence : MIT
+- jspdf 2.5.1 — licence : MIT
+- xlsx 0.18.5 — licence : Apache-2.0
