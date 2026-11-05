@@ -1,16 +1,11 @@
 /* Service worker HotelDesk : l'application s'ouvre même sans internet.
    - Page et bibliothèques : mises en cache, mises à jour dès que le réseau revient.
    - Données (Supabase) et assistant IA : jamais mis en cache, toujours via le réseau. */
-const CACHE = 'hoteldesk-v1';
+const CACHE = 'hoteldesk-v2';
 const SHELL = ['./', 'index.html', 'manifest.webmanifest', 'icon-192.png', 'icon-512.png'];
 const LIBS = [
-  'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js',
-  'https://cdn.jsdelivr.net/npm/lucide@latest/dist/umd/lucide.js',
-  'https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js',
-  'https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.4.1/papaparse.min.js',
-  'https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js',
-  'https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js',
-  'https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js',
+  'lib-supabase-2.117.3.js', 'lib-lucide-1.55.0.js', 'lib-chart-4.4.1.js', 'lib-papaparse-5.4.1.min.js',
+  'lib-html2canvas-1.4.1.min.js', 'lib-jspdf-2.5.1.umd.min.js', 'lib-xlsx-0.18.5.full.min.js',
   'https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600;700&family=Inter:wght@400;500;600;700&display=swap'
 ];
 
