@@ -1,0 +1,13 @@
+{
+  "version": "2026-11-03.1",
+  "service_worker": "hoteldesk-v2",
+  "bibliotheques": {
+    "@supabase/supabase-js": "2.117.3",
+    "lucide": "1.55.0",
+    "chart.js": "4.4.1",
+    "papaparse": "5.4.1",
+    "html2canvas": "1.4.1",
+    "jspdf": "2.5.1",
+    "xlsx": "0.18.5"
+  }
+}
